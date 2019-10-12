@@ -18,7 +18,6 @@ wimage = rgb2gray(img);
 ImageSet(1,:,:) = wimage;
 
 for i = 2:32
-    
     tmp = wimage;
     img = imread(strcat(int2str(i-1), '.jpg'));
     img = rgb2gray(img);
@@ -36,13 +35,13 @@ for i = 2:32
     [inliers, ransacWarp]=iat_ransac( X2h, X1h,'affine','tol',.05, 'maxInvalidCount', 10);
     %iat_plot_correspondences(img,tmp,X1(inliers,:)',X2(inliers,:)');
 
-    [M,N] = size(tmp);
     [wimage, support] = iat_inverse_warping(img, ransacWarp, 'affine', 1:N, 1:M);
     %figure; imshow(tmp); figure; imshow(uint8(wimage));
  
     ImageSet(i,:,:) = wimage;
 end
-%}
+
+
 
 %% Step 2 Focus Measure
 
@@ -51,6 +50,7 @@ FM = zeros(PicNum, M, N);
 Intensity = zeros(M, N);
 
 % Calculating OTF
+
 OTF = zeros(M,N);
 sigma1 = 0.01;
 sigma2 = 0.1;
@@ -80,7 +80,7 @@ figure; imshow(uint8(OTF));
 
 for i = 1:32
     img = squeeze(ImageSet(i,:,:));
-    %XYZa = (PlaneSpeed(i+1,1:3) - 2*PlaneSpeed(i,1:3) + PlaneSpeed(i-1,1:3)) / (data.Time(i)-data.Time(i-1))^2;
+
     for j = 2:M-1
        for k = 2:N-1 
           Intensity(j,k) = (img(j+1,k) - 2*img(j,k) + img(j-1,k)) + (img(j,k+1) - 2*img(j,k) + img(j,k-1));
@@ -98,9 +98,10 @@ for i = 1:32
             end
         end
     end
+    %figure; imshow(uint8(rescale(squeeze(FM(i,:,:)),0,255)));
 end
-figure; imshow(uint8(rescale(squeeze(FM(1,:,:)),0,255)));
-figure; imshow(uint8(rescale(squeeze(FM(32,:,:)),0,255)));
+%figure; imshow(uint8(rescale(squeeze(FM(1,:,:)),0,255)));
+%figure; imshow(uint8(rescale(squeeze(FM(32,:,:)),0,255)));
 
 for i = 1:M
     for j = 1:N
@@ -109,5 +110,82 @@ for i = 1:M
     end
 end
 
-figure; imshow(uint8(rescale(IndexMap,0,255)));
+IndexMapCrop = IndexMap(32:M-32, 64:N-64);
+%figure; imshow(uint8(rescale(IndexMapCrop,0,255)));
+%colormap(flipud(jet)); colorbar;
+
+
+% Collect edge detections from all frames
+Edge = zeros(PicNum, M, N);
+EdgeSum = zeros(M, N);
+for i = 1:PicNum
+    Edge(i,:,:) = edge(squeeze(ImageSet(i,:,:)));
+    for j = 1:M
+        for k = 1:N
+            if Edge(i,j,k) > 0
+                Edge(i,j,k) = FM(i,j,k);
+            end
+        end
+    end
+    
+    EdgeSum = EdgeSum + edge(squeeze(ImageSet(i,:,:)));
+end
+figure; imshow(uint8(rescale(EdgeSum,0,255)));
+
+% Sparse depth map confident (valid) pixels
+EdgeSumColor = zeros(M, N, 3);
+ColorJet = flipud(jet(32));
+for i = 1:M
+    for j = 1:N
+        if EdgeSum(i,j) > 0
+            EdgeSumColor(i,j,:) = ColorJet(IndexMap(i,j),:);
+        end
+    end
+end
+EdgeSumColorCrop = EdgeSumColor(32:M-32, 64:N-64, :);
+%figure; imshow(uint8(rescale(EdgeSumColorCrop,0,255)));
+%}
+
+
+%% Step3. Graph-cuts
+
+mat_D = zeros(PicNum, M, N);
+MaxEdge = max(max(max(Edge)));
+for i = 1:M
+    for j = 1:N
+        if sum(Edge(:,i,j)) ~= 0
+            mat_D(:,i,j) = MaxEdge - Edge(:,i,j);
+        else
+            mat_D(:,i,j) = 0;
+        end
+    end
+end
+mat_D = mat_D(:, 32:M-32, 64:N-64);
+mat_D = mat_D(:,:);
+mat_D = mat_D / (2*10e3);
+
+[M,N] = size(IndexMapCrop);
+mat_S = zeros(PicNum, PicNum);
+for i = 1:PicNum
+    for j = 1:PicNum
+        mat_S(i,j) = abs(i-j);
+    end
+end
+
+mat_N = sparse(M*N, M*N);
+idx = [M+1 : M*(N-1)]';
+idx(mod(idx, M) == 0 | mod(idx, M) == 1) = [];
+mat_N = sparse([idx, idx, idx, idx], [idx+1, idx-1, idx+M, idx-M], ones(size(idx,1), 4), M*N, M*N);
+mat_N = mat_N';
+
+h = GCO_Create(M*N, PicNum);
+GCO_SetDataCost(h,int32(mat_D));
+GCO_SetSmoothCost(h,int32(mat_S));
+GCO_SetNeighbors(h,mat_N); 
+GCO_Expansion(h);
+Labeled_data = GCO_GetLabeling(h); % (H*W)
+GCO_Delete(h);
+
+GraphCuts = reshape(Labeled_data,M,N);
+figure; imshow(uint8(rescale(GraphCuts,0,255)));
 colormap(flipud(jet)); colorbar;
