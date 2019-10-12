@@ -7,8 +7,10 @@ addpath('gco-v3.0\matlab');
 M = 720;
 N = 1280;
 PicNum = 32;
-
 %{
+
+
+AlignImage = zeros(PicNum, M, N, 3);
 %% Step1. Image Alignment
 
 ImageSet = zeros(PicNum, M, N);
@@ -16,10 +18,12 @@ ImageSet = zeros(PicNum, M, N);
 img = imread('0.jpg');
 wimage = rgb2gray(img);
 ImageSet(1,:,:) = wimage;
+AlignImage(1,:,:,:) = img;
 
 for i = 2:32
     tmp = wimage;
     img = imread(strcat(int2str(i-1), '.jpg'));
+    AlignImage(i,:,:,:) = img;
     img = rgb2gray(img);
 
     [d1, l1]=iat_surf(img);
@@ -37,7 +41,8 @@ for i = 2:32
 
     [wimage, support] = iat_inverse_warping(img, ransacWarp, 'affine', 1:N, 1:M);
     %figure; imshow(tmp); figure; imshow(uint8(wimage));
- 
+    [AlignImage(i,:,:,:), support2] = iat_inverse_warping(squeeze(AlignImage(i,:,:,:)), ransacWarp, 'affine', 1:N, 1:M);
+    
     ImageSet(i,:,:) = wimage;
 end
 
@@ -144,7 +149,7 @@ for i = 1:M
 end
 EdgeSumColorCrop = EdgeSumColor(32:M-32, 64:N-64, :);
 %figure; imshow(uint8(rescale(EdgeSumColorCrop,0,255)));
-%}
+
 
 
 %% Step3. Graph-cuts
@@ -189,3 +194,27 @@ GCO_Delete(h);
 GraphCuts = reshape(Labeled_data,M,N);
 figure; imshow(uint8(rescale(GraphCuts,0,255)));
 colormap(flipud(jet)); colorbar;
+%}
+
+
+%% Step4. All in Focus Image
+M = 657;
+N = 1153;
+
+order = [];
+for i = 1:PicNum
+    order = [order; mean(mod(find(GraphCuts == i), M))];
+end
+order = sort(order);
+order = [1; (order(1:end-1) + order(2:end)) / 2; M];
+order = floor(order);
+
+FocusImage = zeros(M, N, 3);
+for i = 1:PicNum
+    FocusImage(order(i):order(i+1), :, :) = squeeze(AlignImage(i, 32+order(i):32+order(i+1), 64:63+N, :));
+end
+
+figure; imshow(uint8(FocusImage));
+
+
+
