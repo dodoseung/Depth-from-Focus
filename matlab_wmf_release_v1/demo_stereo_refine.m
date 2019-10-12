@@ -3,8 +3,8 @@
 close all;
 clear all;
 
-pair_name = 'tsukuba';
-%pair_name = 'venus';
+%pair_name = 'tsukuba';
+pair_name = 'venus';
 
 if strcmp(pair_name, 'tsukuba')
     num_disp = 15;

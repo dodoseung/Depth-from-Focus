@@ -1,26 +1,34 @@
-%clear;
+clear;
 close all;
 
-addpath('PA1_dataset2_keyboard');
+dataset = 2;
+
+if dataset == 1
+    addpath('PA1_dataset1_balls');
+    PicNum = 24;
+elseif dataset == 2
+    addpath('PA1_dataset2_keyboard');
+    PicNum = 32;
+end
+
 addpath('gco-v3.0\matlab');
+addpath('matlab_wmf_release_v1');
 
 M = 720;
 N = 1280;
-PicNum = 32;
-%{
 
 
-AlignImage = zeros(PicNum, M, N, 3);
 %% Step1. Image Alignment
 
 ImageSet = zeros(PicNum, M, N);
+AlignImage = zeros(PicNum, M, N, 3);
 
 img = imread('0.jpg');
 wimage = rgb2gray(img);
 ImageSet(1,:,:) = wimage;
 AlignImage(1,:,:,:) = img;
 
-for i = 2:32
+for i = 2:PicNum
     tmp = wimage;
     img = imread(strcat(int2str(i-1), '.jpg'));
     AlignImage(i,:,:,:) = img;
@@ -45,7 +53,7 @@ for i = 2:32
     
     ImageSet(i,:,:) = wimage;
 end
-
+figure; imshow(uint8(squeeze(ImageSet(PicNum,:,:)))); title('Feature Based Alignment');
 
 
 %% Step 2 Focus Measure
@@ -81,9 +89,9 @@ OTF(1:M/2,N/2+1:N) = flip(OTFhalf);
 OTF(M/2+1:M,N/2+1:N) = OTFhalf;
 
 OTF = rescale(OTF,0,255);
-figure; imshow(uint8(OTF));
+%figure; imshow(uint8(OTF));
 
-for i = 1:32
+for i = 1:PicNum
     img = squeeze(ImageSet(i,:,:));
 
     for j = 2:M-1
@@ -105,8 +113,6 @@ for i = 1:32
     end
     %figure; imshow(uint8(rescale(squeeze(FM(i,:,:)),0,255)));
 end
-%figure; imshow(uint8(rescale(squeeze(FM(1,:,:)),0,255)));
-%figure; imshow(uint8(rescale(squeeze(FM(32,:,:)),0,255)));
 
 for i = 1:M
     for j = 1:N
@@ -116,9 +122,8 @@ for i = 1:M
 end
 
 IndexMapCrop = IndexMap(32:M-32, 64:N-64);
-%figure; imshow(uint8(rescale(IndexMapCrop,0,255)));
-%colormap(flipud(jet)); colorbar;
-
+figure; imshow(uint8(rescale(IndexMapCrop,0,255))); title('Focus Map');
+colormap(flipud(jet)); colorbar;
 
 % Collect edge detections from all frames
 Edge = zeros(PicNum, M, N);
@@ -135,7 +140,7 @@ for i = 1:PicNum
     
     EdgeSum = EdgeSum + edge(squeeze(ImageSet(i,:,:)));
 end
-figure; imshow(uint8(rescale(EdgeSum,0,255)));
+%figure; imshow(uint8(rescale(EdgeSum,0,255)));
 
 % Sparse depth map confident (valid) pixels
 EdgeSumColor = zeros(M, N, 3);
@@ -148,7 +153,7 @@ for i = 1:M
     end
 end
 EdgeSumColorCrop = EdgeSumColor(32:M-32, 64:N-64, :);
-%figure; imshow(uint8(rescale(EdgeSumColorCrop,0,255)));
+figure; imshow(uint8(rescale(EdgeSumColorCrop,0,255))); title('Edge Image');
 
 
 
@@ -167,7 +172,12 @@ for i = 1:M
 end
 mat_D = mat_D(:, 32:M-32, 64:N-64);
 mat_D = mat_D(:,:);
-mat_D = mat_D / (2*10e3);
+
+if dataset == 1
+    mat_D = mat_D / (0.01*10e3);
+elseif dataset == 2
+    mat_D = mat_D / (2*10e3);
+end
 
 [M,N] = size(IndexMapCrop);
 mat_S = zeros(PicNum, PicNum);
@@ -192,14 +202,12 @@ Labeled_data = GCO_GetLabeling(h); % (H*W)
 GCO_Delete(h);
 
 GraphCuts = reshape(Labeled_data,M,N);
-figure; imshow(uint8(rescale(GraphCuts,0,255)));
+figure; imshow(uint8(rescale(GraphCuts,0,255))); title('Graph-cuts Result');
 colormap(flipud(jet)); colorbar;
-%}
+
 
 
 %% Step4. All in Focus Image
-M = 657;
-N = 1153;
 
 order = [];
 for i = 1:PicNum
@@ -214,7 +222,23 @@ for i = 1:PicNum
     FocusImage(order(i):order(i+1), :, :) = squeeze(AlignImage(i, 32+order(i):32+order(i+1), 64:63+N, :));
 end
 
-figure; imshow(uint8(FocusImage));
+figure; imshow(uint8(FocusImage)); title('All in Focus Image');
 
 
+
+%% Step5. Depth Refinement
+
+num_disp = PicNum;
+
+dispMapInput  = GraphCuts;
+imgGuide = FocusImage;
+
+r = ceil(max(size(imgGuide, 1), size(imgGuide, 2)) / 40);
+eps = 0.01^2;
+
+dispMapOutput = weighted_median_filter(dispMapInput, imgGuide, 1:num_disp, r, eps);
+dispMapOutput = medfilt2(dispMapOutput,[3,3]);
+
+figure; imshow(uint8(rescale(dispMapOutput,0,255))); title('Depth Refinement');
+colormap(flipud(jet));
 
